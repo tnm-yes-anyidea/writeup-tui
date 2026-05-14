@@ -1,0 +1,35 @@
+plan1.md
+
+# Binary Executables
+# ------------------
+ctf-tui
+ctf-tui-arm
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+
+# Go Dependency & Build Artifacts
+# -------------------------------
+vendor/
+*.test
+*.out
+
+# Environment & Temporary Files
+# -----------------------------
+.env
+virc*
+ctf-repo-*
+
+# OS Specific
+# -----------
+.DS_Store
+Thumbs.db
+
+# IDEs
+# ----
+.idea/
+.vscode/
+*.swp
+*.swo
