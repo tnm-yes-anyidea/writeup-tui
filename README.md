@@ -3,5 +3,6 @@
 ### To run,in terminal enter :
 ####   ./ctf-tui   [link of github repo]
 
+![Alt Text](demo.svg)
 
 
