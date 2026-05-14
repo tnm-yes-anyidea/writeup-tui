@@ -6,6 +6,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"runtime"
 	"strings"
 
@@ -310,6 +311,29 @@ func normalizeType(wType string) string {
 	return strings.Title(strings.TrimSpace(wType))
 }
 
+// isIndexFile checks if a filename is an index-type file (INDEX.md, osint.md, etc.) regardless of spacing
+func isIndexFile(fileName string) bool {
+	// Remove extension and convert to lowercase
+	nameWithoutExt := strings.ToLower(strings.TrimSuffix(fileName, ".md"))
+	
+	// Remove all spaces and underscores for normalization
+	normalized := regexp.MustCompile(`[\s_-]+`).ReplaceAllString(nameWithoutExt, "")
+	
+	// List of known index-type files
+	indexFiles := map[string]bool{
+		"index":     true,
+		"readme":    true,
+		"contents":  true,
+		"osint":     true,
+		"web":       true,
+		"notes":     true,
+		"summary":   true,
+		"writeup":   true,
+	}
+	
+	return indexFiles[normalized]
+}
+
 func main() {
 	if len(os.Args) < 2 {
 		fmt.Println("Usage: ctf-tui <local_directory_path OR github_repository_url>")
@@ -363,13 +387,22 @@ func main() {
 			ctfName := "Misc"
 			fileName := info.Name()
 
-			// Smart parsing of path hierarchy (e.g., Exploitation(PWN)/AC/challenge.md)
-			if len(parts) >= 3 {
-				wType = normalizeType(parts[0])
-				ctfName = parts[1]
-			} else if len(parts) == 2 {
-				wType = normalizeType(parts[0])
-				ctfName = "Root"
+			// Check if this is an index-type file
+			if isIndexFile(fileName) {
+				// Index files are stored separately for easier access
+				ctfName = "📚 Index Files"
+				if len(parts) >= 1 {
+					wType = normalizeType(parts[0])
+				}
+			} else {
+				// Smart parsing of path hierarchy (e.g., Exploitation(PWN)/AC/challenge.md)
+				if len(parts) >= 3 {
+					wType = normalizeType(parts[0])
+					ctfName = parts[1]
+				} else if len(parts) == 2 {
+					wType = normalizeType(parts[0])
+					ctfName = "Root"
+				}
 			}
 
 			items = append(items, writeupItem{
@@ -389,7 +422,7 @@ func main() {
 	}
 
 	ti := textinput.New()
-	ti.Placeholder = "Search (e.g. 'WebExploitation AC')..."
+	ti.Placeholder = "Search (e.g. 'WebExploitation AC' or 'index osint')..."
 	ti.Focus()
 
 	m := model{
