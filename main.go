@@ -278,6 +278,38 @@ func max(a, b int) int {
 	return b
 }
 
+// normalizeType standardizes category names to match Void-Walkers-Community/Writeups conventions
+func normalizeType(wType string) string {
+	// Map variations to canonical names
+	typeMap := map[string]string{
+		"web exploitation":  "WebExploitation",
+		"webexploitation":    "WebExploitation",
+		"web_exploitation":   "WebExploitation",
+		"exploitation(pwn)":  "Exploitation(PWN)",
+		"exploitation":       "Exploitation(PWN)",
+		"pwn":                "Exploitation(PWN)",
+		"reverse engineering": "ReverseEngineering",
+		"reverse_engineering": "ReverseEngineering",
+		"reversengineering":   "ReverseEngineering",
+		"digital forensics":   "DigitalForensics",
+		"digital_forensics":   "DigitalForensics",
+		"digitalforensics":    "DigitalForensics",
+		"cloud security":      "CloudSecurity",
+		"cloud_security":      "CloudSecurity",
+		"cloudsecurity":       "CloudSecurity",
+		"general skills":      "GeneralSkills",
+		"general_skills":      "GeneralSkills",
+		"generalskills":       "GeneralSkills",
+	}
+
+	normalized := strings.ToLower(strings.TrimSpace(wType))
+	if canonical, exists := typeMap[normalized]; exists {
+		return canonical
+	}
+	// Return original with first letter capitalized if no mapping exists
+	return strings.Title(strings.TrimSpace(wType))
+}
+
 func main() {
 	if len(os.Args) < 2 {
 		fmt.Println("Usage: ctf-tui <local_directory_path OR github_repository_url>")
@@ -292,13 +324,13 @@ func main() {
 	if strings.HasPrefix(target, "http://") || strings.HasPrefix(target, "https://") || strings.HasPrefix(target, "git@") {
 		repoURL = target
 		fmt.Printf("[*] Cloning online repository down to local storage: %s\n", target)
-		
+
 		tempDir, err := os.MkdirTemp("", "ctf-repo-")
 		if err != nil {
 			fmt.Printf("[-] Failed to create system temporary workspace: %v\n", err)
 			os.Exit(1)
 		}
-		
+
 		// Run a fast, shallow clone to minimize download sizes
 		cloneCmd := exec.Command("git", "clone", "--depth", "1", repoURL, tempDir)
 		cloneCmd.Stdout = os.Stdout
@@ -307,7 +339,7 @@ func main() {
 			fmt.Printf("[-] Git operations failed: %v\n", err)
 			os.Exit(1)
 		}
-		
+
 		// Read the branch name to construct correct URLs for browser links
 		branchCmd := exec.Command("git", "-C", tempDir, "rev-parse", "--abbrev-ref", "HEAD")
 		if out, err := branchCmd.Output(); err == nil {
@@ -315,7 +347,7 @@ func main() {
 		} else {
 			currentBranch = "main"
 		}
-		
+
 		target = tempDir
 		// Delete the temporary clone automatically when the TUI exits
 		defer os.RemoveAll(tempDir)
@@ -326,17 +358,17 @@ func main() {
 		if err == nil && !info.IsDir() && strings.HasSuffix(strings.ToLower(path), ".md") && !strings.Contains(path, "/.git/") {
 			rel, _ := filepath.Rel(target, path)
 			parts := strings.Split(rel, string(filepath.Separator))
-			
+
 			wType := "General"
 			ctfName := "Misc"
 			fileName := info.Name()
 
-			// Smart parsing of path hierarchy (e.g., Exploitation/AC/challenge.md)
+			// Smart parsing of path hierarchy (e.g., Exploitation(PWN)/AC/challenge.md)
 			if len(parts) >= 3 {
-				wType = parts[0]
+				wType = normalizeType(parts[0])
 				ctfName = parts[1]
 			} else if len(parts) == 2 {
-				wType = parts[0]
+				wType = normalizeType(parts[0])
 				ctfName = "Root"
 			}
 
@@ -357,7 +389,7 @@ func main() {
 	}
 
 	ti := textinput.New()
-	ti.Placeholder = "Search (e.g. 'Exploitation AC')..."
+	ti.Placeholder = "Search (e.g. 'WebExploitation AC')..."
 	ti.Focus()
 
 	m := model{
