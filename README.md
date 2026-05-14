@@ -4,4 +4,4 @@
 ####   ./ctf-tui   [link of github repo]
 
 
-![Alt Text](path/to/demo.svg)
+![Alt Text](demo.svg)
