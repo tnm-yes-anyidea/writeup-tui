@@ -16,6 +16,8 @@ vendor/
 *.test
 *.out
 
+# Example
+*.svg
 # Environment & Temporary Files
 # -----------------------------
 .env
