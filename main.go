@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"runtime"
+	"sort"
 	"strings"
 
 	"github.com/charmbracelet/bubbles/textinput"
@@ -16,17 +17,35 @@ import (
 	"github.com/charmbracelet/lipgloss"
 )
 
-// Styles for a modern 2026 terminal look
-var (
-	borderStyle = lipgloss.NewStyle().
-			Border(lipgloss.RoundedBorder()).
-			BorderForeground(lipgloss.Color("62")).
-			Padding(0, 1)
-	headerStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("244")).Italic(true)
-	typeStyle   = lipgloss.NewStyle().Foreground(lipgloss.Color("214")).Bold(true)
-	ctfStyle    = lipgloss.NewStyle().Foreground(lipgloss.Color("42"))
-	treeStyle   = lipgloss.NewStyle().Foreground(lipgloss.Color("12"))
-)
+// Theme System
+type Theme struct {
+	Name    string
+	Border  lipgloss.Color
+	Header  lipgloss.Color
+	Type    lipgloss.Color
+	CTF     lipgloss.Color
+	Tree    lipgloss.Color
+	Glamour string // matches glamour styles: "dark", "light", "notty", "dracula", etc.
+}
+
+var appThemes = []Theme{
+	{"Cyber (Default)", "62", "244", "214", "42", "12", "dark"},
+	{"Hacker Terminal", "46", "240", "46", "46", "46", "notty"},
+	{"Dracula", "99", "244", "212", "84", "141", "dracula"},
+	{"Light Mode", "240", "244", "202", "28", "21", "light"},
+	{"Neon Synth", "201", "250", "226", "118", "51", "dark"},
+}
+
+// Dynamic Style Generators
+func (t Theme) borderStyle() lipgloss.Style {
+	return lipgloss.NewStyle().Border(lipgloss.RoundedBorder()).BorderForeground(t.Border).Padding(0, 1)
+}
+func (t Theme) headerStyle() lipgloss.Style {
+	return lipgloss.NewStyle().Foreground(t.Header).Italic(true)
+}
+func (t Theme) typeStyle() lipgloss.Style { return lipgloss.NewStyle().Foreground(t.Type).Bold(true) }
+func (t Theme) ctfStyle() lipgloss.Style  { return lipgloss.NewStyle().Foreground(t.CTF) }
+func (t Theme) treeStyle() lipgloss.Style { return lipgloss.NewStyle().Foreground(t.Tree) }
 
 const vimConfig = `
 set nocompatible
@@ -63,6 +82,11 @@ type model struct {
 	statusMessage string
 	targetPath    string
 	viewMode      string // "list", "groups", or "fulltree"
+
+	// New features state
+	themeIndex int
+	sortMode   int // 0: Default, 1: Name, 2: Category
+	showHelp   bool
 }
 
 // GetDirectoryTree generates a recursive visual tree of the workspace
@@ -92,7 +116,6 @@ func GetDirectoryTree(root string, indent string, isLast bool) string {
 	files, _ := os.ReadDir(root)
 	var filteredFiles []os.DirEntry
 	for _, f := range files {
-		// Ignore hidden files and .git
 		if !strings.HasPrefix(f.Name(), ".") && f.Name() != ".git" {
 			filteredFiles = append(filteredFiles, f)
 		}
@@ -115,26 +138,43 @@ func GetDirectoryTree(root string, indent string, isLast bool) string {
 
 func (m *model) filterFiles() {
 	query := strings.ToLower(m.input.Value())
-	if query == "" {
-		m.filtered = m.items
-		return
-	}
-	terms := strings.Fields(query)
+
+	// 1. Text Filtering
 	var matched []writeupItem
-	for _, item := range m.items {
-		searchSpace := strings.ToLower(fmt.Sprintf("%s %s %s", item.wType, item.ctfName, item.fileName))
-		matchAll := true
-		for _, term := range terms {
-			if !strings.Contains(searchSpace, term) {
-				matchAll = false
-				break
+	if query == "" {
+		matched = append([]writeupItem(nil), m.items...)
+	} else {
+		terms := strings.Fields(query)
+		for _, item := range m.items {
+			searchSpace := strings.ToLower(fmt.Sprintf("%s %s %s", item.wType, item.ctfName, item.fileName))
+			matchAll := true
+			for _, term := range terms {
+				if !strings.Contains(searchSpace, term) {
+					matchAll = false
+					break
+				}
 			}
-		}
-		if matchAll {
-			matched = append(matched, item)
+			if matchAll {
+				matched = append(matched, item)
+			}
 		}
 	}
 	m.filtered = matched
+
+	// 2. Sorting
+	if m.sortMode > 0 {
+		sort.SliceStable(m.filtered, func(i, j int) bool {
+			if m.sortMode == 1 { // By Name
+				return m.filtered[i].fileName < m.filtered[j].fileName
+			}
+			// By Category -> Name
+			if m.filtered[i].wType == m.filtered[j].wType {
+				return m.filtered[i].fileName < m.filtered[j].fileName
+			}
+			return m.filtered[i].wType < m.filtered[j].wType
+		})
+	}
+
 	if m.cursor >= len(m.filtered) {
 		m.cursor = max(0, len(m.filtered)-1)
 	}
@@ -152,7 +192,9 @@ func (m *model) updatePreview() {
 		return
 	}
 	content, _ := os.ReadFile(m.filtered[m.cursor].fullPath)
-	renderer, _ := glamour.NewTermRenderer(glamour.WithStandardStyle("dark"), glamour.WithWordWrap(m.viewport.Width-4))
+
+	// Use the active theme's glamour style for markdown parsing
+	renderer, _ := glamour.NewTermRenderer(glamour.WithStandardStyle(appThemes[m.themeIndex].Glamour), glamour.WithWordWrap(m.viewport.Width-4))
 	rendered, _ := renderer.Render(string(content))
 	m.viewport.SetContent(rendered)
 	m.viewport.GotoTop()
@@ -185,6 +227,18 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.viewMode = "list"
 			}
 			m.updatePreview()
+		case "ctrl+p": // Select Theme
+			m.themeIndex = (m.themeIndex + 1) % len(appThemes)
+			m.statusMessage = " Theme: " + appThemes[m.themeIndex].Name
+			m.updatePreview()
+		case "ctrl+s": // Sort Mode
+			m.sortMode = (m.sortMode + 1) % 3
+			modes := []string{"Default", "File Name", "Category"}
+			m.statusMessage = " Sorted by: " + modes[m.sortMode]
+			m.filterFiles()
+			m.updatePreview()
+		case "ctrl+h": // Help Menu
+			m.showHelp = !m.showHelp
 		case "up", "ctrl+k":
 			if m.viewMode == "fulltree" {
 				m.viewport.LineUp(1)
@@ -238,7 +292,8 @@ func (m model) View() string {
 		return "Initializing..."
 	}
 
-	// Fix for Title issue: Define style then render
+	t := appThemes[m.themeIndex]
+
 	var viewTitle string
 	if m.viewMode == "fulltree" {
 		viewTitle = " Repository Tree (Scroll with Arrows) "
@@ -246,39 +301,62 @@ func (m model) View() string {
 		viewTitle = " Writeup Preview "
 	}
 
-	// Apply style with dynamic width/height
-	styledBox := borderStyle.Copy().
+	// Apply dynamic style with width/height bounds
+	styledBox := t.borderStyle().Copy().
 		Width(m.width - 2).
 		Height(int(float64(m.height)*0.55) - 2)
 
 	// Combine components
-	preview := styledBox.Render(fmt.Sprintf("%s\n%s", typeStyle.Render(viewTitle), m.viewport.View()))
+	preview := styledBox.Render(fmt.Sprintf("%s\n%s", t.typeStyle().Render(viewTitle), m.viewport.View()))
 
 	var listBody string
 	maxLines := m.height - int(float64(m.height)*0.55) - 5
 
-	switch m.viewMode {
-	case "groups":
-		listBody = m.renderGrouped(maxLines)
-	case "list":
-		listBody = m.renderList(maxLines)
-	default:
-		listBody = "\n  " + ctfStyle.Render("[ Tree Mode Active - Ctrl+T to exit ]")
+	if m.showHelp {
+		helpBox := lipgloss.NewStyle().
+			Foreground(t.Type).
+			Border(lipgloss.RoundedBorder()).
+			BorderForeground(t.Border).
+			Padding(1, 4).
+			MarginLeft(2)
+		listBody = helpBox.Render(
+			"📚 CTF-TUI HELP MENU 📚\n\n" +
+				"  [↑/↓, Ctrl+k/j] Navigate items\n" +
+				"  [Enter]         Open in less\n" +
+				"  [Ctrl+v]        Open in vim\n" +
+				"  [Ctrl+o]        Open in browser\n" +
+				"  [Tab]           Toggle layout (List/Groups)\n" +
+				"  [Ctrl+t]        Toggle full tree view\n" +
+				"  [Ctrl+p]        Cycle UI themes\n" +
+				"  [Ctrl+s]        Cycle sorting (Path/Name/Category)\n" +
+				"  [Ctrl+h]        Toggle this help menu\n" +
+				"  [Ctrl+c/Esc]    Quit application\n",
+		)
+	} else {
+		switch m.viewMode {
+		case "groups":
+			listBody = m.renderGrouped(maxLines)
+		case "list":
+			listBody = m.renderList(maxLines)
+		default:
+			listBody = "\n  " + t.ctfStyle().Render("[ Tree Mode Active - Ctrl+T to exit ]")
+		}
 	}
 
-	help := headerStyle.Render(" [TAB] View | [Ctrl+T] Tree | [Enter] Less | [Ctrl+V] Vim | [Ctrl+O] Browser")
+	help := t.headerStyle().Render(" [TAB] View | [Ctrl+T] Tree | [Ctrl+P] Theme | [Ctrl+S] Sort | [Ctrl+H] Help")
 	prompt := fmt.Sprintf(" ⚡ Search: %s %s", m.input.View(), m.statusMessage)
 
 	return lipgloss.JoinVertical(lipgloss.Left, preview, help, listBody, prompt)
 }
 
 func (m model) renderList(limit int) string {
+	t := appThemes[m.themeIndex]
 	var lines []string
 	for i, item := range m.filtered {
 		if len(lines) >= limit {
 			break
 		}
-		line := fmt.Sprintf("[%s] [%s] %s", typeStyle.Render(item.wType), ctfStyle.Render(item.ctfName), item.fileName)
+		line := fmt.Sprintf("[%s] [%s] %s", t.typeStyle().Render(item.wType), t.ctfStyle().Render(item.ctfName), item.fileName)
 		if i == m.cursor {
 			lines = append(lines, "▶ \033[36m"+line+"\033[0m")
 		} else {
@@ -289,6 +367,7 @@ func (m model) renderList(limit int) string {
 }
 
 func (m model) renderGrouped(limit int) string {
+	t := appThemes[m.themeIndex]
 	var lines []string
 	currT, currC := "", ""
 	for i, item := range m.filtered {
@@ -297,11 +376,11 @@ func (m model) renderGrouped(limit int) string {
 		}
 		if item.wType != currT {
 			currT = item.wType
-			lines = append(lines, treeStyle.Render("📂 "+currT))
+			lines = append(lines, t.treeStyle().Render("📂 "+currT))
 		}
 		if item.ctfName != currC {
 			currC = item.ctfName
-			lines = append(lines, "  ┗━ "+ctfStyle.Render("📦 "+currC))
+			lines = append(lines, "  ┗━ "+t.ctfStyle().Render("📦 "+currC))
 		}
 		prefix := "     "
 		if i == m.cursor {
@@ -412,6 +491,9 @@ func main() {
 		branch:     branch,
 		viewMode:   "list",
 		targetPath: target,
+		themeIndex: 0,
+		sortMode:   0,
+		showHelp:   false,
 	}
 
 	p := tea.NewProgram(m, tea.WithAltScreen())
